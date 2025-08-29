@@ -30,33 +30,36 @@ MIGRATIONS = [
 );""",
     """CREATE TABLE IF NOT EXISTS checkpoints (
     thread_id VARCHAR(150) NOT NULL,
-    checkpoint_ns VARCHAR(150) NOT NULL DEFAULT '',
+    checkpoint_ns VARCHAR(2000) NOT NULL DEFAULT '',
     checkpoint_id VARCHAR(150) NOT NULL,
     parent_checkpoint_id VARCHAR(150),
     type VARCHAR(150),
     checkpoint JSON NOT NULL,
-    metadata JSON NOT NULL DEFAULT ('{}'),
-    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+    metadata JSON NOT NULL,
+    checkpoint_ns_hash BINARY(16),
+    PRIMARY KEY (thread_id,checkpoint_ns_hash,checkpoint_id)
 );""",
     """CREATE TABLE IF NOT EXISTS checkpoint_blobs (
     thread_id VARCHAR(150) NOT NULL,
-    checkpoint_ns VARCHAR(150) NOT NULL DEFAULT '',
+    checkpoint_ns VARCHAR(2000) NOT NULL DEFAULT '',
     channel VARCHAR(150) NOT NULL,
     version VARCHAR(150) NOT NULL,
     type VARCHAR(150) NOT NULL,
     `blob` LONGBLOB,
-    PRIMARY KEY (thread_id, checkpoint_ns, channel, version)
+    checkpoint_ns_hash BINARY(16),
+    PRIMARY KEY (thread_id,checkpoint_ns_hash,channel, version)
 );""",
     """CREATE TABLE IF NOT EXISTS checkpoint_writes (
     thread_id VARCHAR(150) NOT NULL,
-    checkpoint_ns VARCHAR(150) NOT NULL DEFAULT '',
+    checkpoint_ns VARCHAR(2000) NOT NULL DEFAULT '',
     checkpoint_id VARCHAR(150) NOT NULL,
     task_id VARCHAR(150) NOT NULL,
     idx INTEGER NOT NULL,
     channel VARCHAR(150) NOT NULL,
     type VARCHAR(150),
     `blob` LONGBLOB NOT NULL,
-    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+    checkpoint_ns_hash BINARY(16),
+    PRIMARY KEY (thread_id,checkpoint_ns_hash,checkpoint_id, task_id, idx)
 );""",
     "ALTER TABLE checkpoint_blobs MODIFY COLUMN `blob` LONGBLOB;",
     """
@@ -76,78 +79,9 @@ MIGRATIONS = [
     "ALTER TABLE checkpoints MODIFY COLUMN `checkpoint_ns` VARCHAR(255) NOT NULL DEFAULT '';",
     "ALTER TABLE checkpoint_blobs MODIFY COLUMN `checkpoint_ns` VARCHAR(255) NOT NULL DEFAULT '';",
     "ALTER TABLE checkpoint_writes MODIFY COLUMN `checkpoint_ns` VARCHAR(255) NOT NULL DEFAULT '';",
-    # The following three migrations drastically increase the size of the
-    # checkpoint_ns field to support deeply nested subgraphs.
-    """
-    ALTER TABLE checkpoints
-    DROP PRIMARY KEY,
-    ADD PRIMARY KEY (thread_id, checkpoint_id),
-    MODIFY COLUMN `checkpoint_ns` VARCHAR(2000) NOT NULL DEFAULT '';
-    """,
-    """
-    ALTER TABLE checkpoint_blobs
-    DROP PRIMARY KEY,
-    ADD PRIMARY KEY (thread_id, channel, version),
-    MODIFY COLUMN `checkpoint_ns` VARCHAR(2000) NOT NULL DEFAULT '';
-    """,
-    """
-    ALTER TABLE checkpoint_writes
-    DROP PRIMARY KEY,
-    ADD PRIMARY KEY (thread_id, checkpoint_id, task_id, idx),
-    MODIFY COLUMN `checkpoint_ns` VARCHAR(2000) NOT NULL DEFAULT '';
-    """,
-    # The following three migrations restore checkpoint_ns as part of the
-    # primary key, but hashed to fit into the primary key size limit.
-    f"""
-    ALTER TABLE checkpoints
-    {
-        mysql_mariadb_branch(
-            "ADD COLUMN checkpoint_ns_hash BINARY(16) AS (UNHEX(MD5(checkpoint_ns))) STORED,",
-            "ADD COLUMN checkpoint_ns_hash BINARY(16),",
-        )
-    }
-    DROP PRIMARY KEY,
-    ADD PRIMARY KEY (thread_id, checkpoint_ns_hash, checkpoint_id);
-    """,
-    f"""
-    ALTER TABLE checkpoint_blobs
-    {
-        mysql_mariadb_branch(
-            "ADD COLUMN checkpoint_ns_hash BINARY(16) AS (UNHEX(MD5(checkpoint_ns))) STORED,",
-            "ADD COLUMN checkpoint_ns_hash BINARY(16),",
-        )
-    }
-    DROP PRIMARY KEY,
-    ADD PRIMARY KEY (thread_id, checkpoint_ns_hash, channel, version);
-    """,
-    f"""
-    ALTER TABLE checkpoint_writes
-    {
-        mysql_mariadb_branch(
-            "ADD COLUMN checkpoint_ns_hash BINARY(16) AS (UNHEX(MD5(checkpoint_ns))) STORED,",
-            "ADD COLUMN checkpoint_ns_hash BINARY(16),",
-        )
-    }
-    DROP PRIMARY KEY,
-    ADD PRIMARY KEY (thread_id, checkpoint_ns_hash, checkpoint_id, task_id, idx);
-    """,
     """
     ALTER TABLE checkpoint_writes ADD COLUMN task_path VARCHAR(2000) NOT NULL DEFAULT '';
-    """,
-    # No longer use STORED generated columns, because MariaDB does not support
-    # using them in primary keys.
-    #
-    #  https://github.com/tjni/langgraph-checkpoint-mysql/issues/51
-    #
     """
-    ALTER TABLE checkpoints MODIFY COLUMN checkpoint_ns_hash BINARY(16);
-    """,
-    """
-    ALTER TABLE checkpoint_blobs MODIFY COLUMN checkpoint_ns_hash BINARY(16);
-    """,
-    """
-    ALTER TABLE checkpoint_writes MODIFY COLUMN checkpoint_ns_hash BINARY(16);
-    """,
 ]
 
 SELECT_SQL = f"""
@@ -157,7 +91,7 @@ with channel_versions as (
     ) as version
     from checkpoints, json_table(
         json_keys(checkpoint, '$.channel_versions'),
-        '$[*]' columns (channel VARCHAR(150) CHARACTER SET utf8mb4 PATH '$')
+        '$[*]' columns (channel VARCHAR(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci PATH '$')
     ) as channels
     {{WHERE}}
 )
@@ -172,7 +106,7 @@ select
         select json_arrayagg(json_array(
             bl.channel,
             bl.type,
-            {mysql_mariadb_branch("bl.blob", "to_base64(bl.blob)")}
+            to_base64(bl.blob)
         ))
         from channel_versions
         inner join checkpoint_blobs bl
@@ -190,7 +124,7 @@ select
             cw.task_id,
             cw.channel,
             cw.type,
-            {mysql_mariadb_branch("cw.blob", "to_base64(cw.blob)")},
+            to_base64(cw.blob),
             cw.idx
         ))
         from checkpoint_writes cw
@@ -207,7 +141,7 @@ select
         task_path,
         task_id,
         type,
-        {mysql_mariadb_branch("`blob`", "to_base64(`blob`)")},
+        to_base64(`blob`),
         idx
     )) as sends
 from checkpoint_writes
