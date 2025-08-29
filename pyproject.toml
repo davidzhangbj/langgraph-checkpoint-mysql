@@ -3,10 +3,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "langgraph-checkpoint-mysql"
+name = "langgraph-checkpoint-oceanbase"
 version = "2.0.17"
-description = "Library with a MySQL implementation of LangGraph checkpoint saver."
-authors = [{ name = "Theodore Ni", email = "dev@ted.bio" }]
+description = "Library with a OceanBase MySQL Mode implementation of LangGraph checkpoint saver."
+authors = [{ name = "David Zhang" }]
 requires-python = ">=3.9"
 readme = "README.md"
 license = "MIT"
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://www.github.com/tjni/langgraph-checkpoint-mysql"
+Repository = "https://www.github.com/davidzhangbj/langgraph-checkpoint-mysql"
 
 [project.optional-dependencies]
 pymysql = ["pymysql>=1.1.1"]
