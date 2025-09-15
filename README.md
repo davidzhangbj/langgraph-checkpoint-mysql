@@ -1,114 +1,113 @@
-# LangGraph Checkpoint MySQL
+# LangGraph Checkpoint OceanBase
 
-Implementation of LangGraph CheckpointSaver that uses MySQL.
+Implementation of LangGraph CheckpointSaver that uses OceanBase MySQL mode.
 
-> [!TIP]
-> The code in this repository tries to mimic the code in [langgraph-checkpoint-postgres](https://github.com/langchain-ai/langgraph/tree/main/libs/checkpoint-postgres) as much as possible to enable keeping in sync with the official checkpointer implementation.
+This project is fork from [langgraph-checkpoint-mysql](https://github.com/tjni/langgraph-checkpoint-mysql).
+Resolving compatibility issues during table creation.
 
-> [!NOTE]
-> In order to keep the queries close to the Postgres queries, we use features that require MySQL >= 8.0.19 or MariaDB >= 10.7.1.
+Please install the following installation package:
+- pymysql
+- langgraph
+- langchain[openai]
+- aiomysql
+- asyncmy
 
-## Dependencies
+You should use OB version that support JSON type.
 
-- To use synchronous `PyMySQLSaver`, install `langgraph-checkpoint-mysql[pymysql]`.
-- To use asynchronous `AIOMySQLSaver`, install `langgraph-checkpoint-mysql[aiomysql]`.
-- To use asynchronous `AsyncMySaver`, install `langgraph-checkpoint-mysql[asyncmy]`.
-
-There is currently no support for other drivers.
-
+langgraph-checkpoint-oceanbase has been uploaded to PyPI. You can install it using   
+`pip install langgraph-checkpoint-oceanbase`
 ## Usage
-
-> [!IMPORTANT]
-> When using MySQL checkpointers for the first time, make sure to call `.setup()` method on them to create required tables. See example below.
-
-> [!IMPORTANT]
-> When manually creating MySQL connections and passing them to `PyMySQLSaver` or `AIOMySQLSaver`, make sure to include `autocommit=True`.
->
-> **Why this parameter is required:**
-> - `autocommit=True`: Required for the `.setup()` method to properly commit the checkpoint tables to the database. Without this, table creation may not be persisted.
-
+### Initialize the database
 ```python
 from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
-
-write_config = {"configurable": {"thread_id": "1", "checkpoint_ns": ""}}
-read_config = {"configurable": {"thread_id": "1"}}
-
-DB_URI = "mysql://mysql:mysql@localhost:3306/mysql"
+DB_URI = "mysql://username:password@ip:port/database"
 with PyMySQLSaver.from_conn_string(DB_URI) as checkpointer:
-    # call .setup() the first time you're using the checkpointer
     checkpointer.setup()
-    checkpoint = {
-        "v": 4,
-        "ts": "2024-07-31T20:14:19.804150+00:00",
-        "id": "1ef4f797-8335-6428-8001-8a1503f9b875",
-        "channel_values": {
-            "my_key": "meow",
-            "node": "node"
-        },
-        "channel_versions": {
-            "__start__": 2,
-            "my_key": 3,
-            "start:node": 3,
-            "node": 3
-        },
-        "versions_seen": {
-            "__input__": {},
-            "__start__": {
-            "__start__": 1
-            },
-            "node": {
-            "start:node": 2
-            }
-        },
-    }
-
-    # store checkpoint
-    checkpointer.put(write_config, checkpoint, {}, {})
-
-    # load checkpoint
-    checkpointer.get(read_config)
-
-    # list checkpoints
-    list(checkpointer.list(read_config))
 ```
-
-### Async
-
+### As Checkpointer
 ```python
-from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
+from langchain.chat_models import init_chat_model
+from langgraph.graph import StateGraph, MessagesState, START
+from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
+from langchain_core.runnables.config import RunnableConfig
+from langchain_core.messages import HumanMessage
+model = init_chat_model(model="qwen-max-latest", api_key="xxx",
+                        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", model_provider="openai",
+                        temperature=0)
+DB_URI = "mysql://username:password@ip:port/database"
+with PyMySQLSaver.from_conn_string(DB_URI) as checkpointer:
+    checkpointer.setup()
 
-async with AIOMySQLSaver.from_conn_string(DB_URI) as checkpointer:
-    checkpoint = {
-        "v": 4,
-        "ts": "2024-07-31T20:14:19.804150+00:00",
-        "id": "1ef4f797-8335-6428-8001-8a1503f9b875",
-        "channel_values": {
-            "my_key": "meow",
-            "node": "node"
-        },
-        "channel_versions": {
-            "__start__": 2,
-            "my_key": 3,
-            "start:node": 3,
-            "node": 3
-        },
-        "versions_seen": {
-            "__input__": {},
-            "__start__": {
-            "__start__": 1
-            },
-            "node": {
-            "start:node": 2
-            }
-        },
+    def call_model(state: MessagesState):
+        response = model.invoke(state["messages"])
+        return {"messages": response}
+    builder = StateGraph(MessagesState)
+    builder.add_node(call_model)
+    builder.add_edge(START, "call_model")
+    graph = builder.compile(checkpointer=checkpointer)
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "1"
+        }
     }
-
-    # store checkpoint
-    await checkpointer.aput(write_config, checkpoint, {}, {})
-
-    # load checkpoint
-    await checkpointer.aget(read_config)
-
-    # list checkpoints
-    [c async for c in checkpointer.alist(read_config)]
+    for chunk in graph.stream(
+        {"messages": [HumanMessage(content="hi! I'm bob")]},
+        config,
+        stream_mode="values"
+    ):
+        chunk["messages"][-1].pretty_print()
+    for chunk in graph.stream(
+        {"messages":[HumanMessage(content="what's my name?")]},
+        config,
+        stream_mode="values"
+    ):
+        chunk["messages"][-1].pretty_print()
 ```
+### As Store
+```python
+from langchain_core.runnables import RunnableConfig
+from langgraph.config import get_store
+from langgraph.prebuilt import create_react_agent
+from langgraph.store.mysql import PyMySQLStore
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import HumanMessage
+from typing_extensions import TypedDict
+DB_URI = "mysql://username:password@ip:port/database"
+model = init_chat_model(model="qwen-max-latest", api_key="xxx",
+                        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", model_provider="openai",temperature=0)
+
+
+class UserInfo(TypedDict):
+    name: str
+
+
+def save_user_info(user_info: UserInfo, config: RunnableConfig) -> str:
+    """Save user info"""
+    store = get_store()
+    user_id = config.get("configurable", {}).get("user_id")
+    if user_id is None:
+        raise ValueError("user_id must be provided in config['configurable']")
+    store.put(("users",), user_id, dict(user_info))
+    return "Successfully saved user info."
+
+
+with PyMySQLStore.from_conn_string(DB_URI) as store:
+    store.setup()
+    agent=create_react_agent(
+        model=model,
+        tools=[save_user_info],
+        store=store
+    )
+    # Run the agent
+    agent.invoke(
+        {"messages":[HumanMessage(content="My name is Tom and save my information")]},
+        config={"configurable":{"user_id":"user_1"}}
+    )
+    # You can access the store directly to get the value
+    result = store.get(("users",), "user_1")
+    if result is not None:
+        print(result.value)
+    else:
+        print("No value found for user_1")
+```
+For detailed usage instructions, please refer to [README document](https://github.com/tjni/langgraph-checkpoint-mysql/blob/main/README.md) of the original repository.
