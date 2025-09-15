@@ -2,8 +2,8 @@
 
 Implementation of LangGraph CheckpointSaver that uses OceanBase MySQL mode.
 
-This project is fork from [langgraph-checkpoint-mysql](https://github.com/tjni/langgraph-checkpoint-mysql).
-Resolving compatibility issues during table creation.
+This project is forked from [langgraph-checkpoint-mysql](https://github.com/tjni/langgraph-checkpoint-mysql).
+Resolved compatibility issues during table creation.
 
 Please install the following installation package:
 - pymysql
@@ -12,12 +12,13 @@ Please install the following installation package:
 - aiomysql
 - asyncmy
 
-You should use OB version that support JSON type.
+You should use oceanbase version that support JSON type.
 
-langgraph-checkpoint-oceanbase has been uploaded to PyPI. You can install it using   
+langgraph-checkpoint-oceanbase has been uploaded to PyPI.  
+You can install it using  
 `pip install langgraph-checkpoint-oceanbase`
 ## Usage
-### Initialize the database
+### Initialize The Database
 ```python
 from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
 DB_URI = "mysql://username:password@ip:port/database"
@@ -32,8 +33,7 @@ from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.messages import HumanMessage
 model = init_chat_model(model="qwen-max-latest", api_key="xxx",
-                        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", model_provider="openai",
-                        temperature=0)
+                        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", model_provider="openai",temperature=0)
 DB_URI = "mysql://username:password@ip:port/database"
 with PyMySQLSaver.from_conn_string(DB_URI) as checkpointer:
     checkpointer.setup()
